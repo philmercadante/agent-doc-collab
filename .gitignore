@@ -1,0 +1,9 @@
+# comment stores (runtime data)
+*.comments.json
+*.json.tmp
+*.json.corrupt
+review-comments.json
+
+# python
+__pycache__/
+*.pyc

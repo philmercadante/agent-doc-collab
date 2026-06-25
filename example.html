@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-doc-collab — example doc</title>
+<style>
+  body { margin:0; background:#faf8f3; color:#23201a;
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
+  .layout { max-width:720px; margin:0 auto; padding:48px 28px 120px; }
+  h1 { font-size:30px; margin:0 0 4px; }
+  h2 { font-size:21px; margin:34px 0 8px; border-top:1px solid #e2dbcd; padding-top:14px; }
+  p { margin:10px 0; }
+  code { background:#efeada; border-radius:4px; padding:1px 5px;
+    font-family:ui-monospace,Menlo,monospace; font-size:14px; }
+</style></head>
+<body><div class="layout">
+
+  <h1>agent-doc-collab — try it</h1>
+  <p>This is a demo document. The commenting layer was injected by
+  <code>comment-server.py</code> when you loaded this page — the file itself was
+  never modified.</p>
+
+  <h2>How to leave a comment</h2>
+  <p>Highlight any run of text in this paragraph with your cursor (or your finger
+  on a touch screen). A small "Comment" button appears; tap it, type a note, and
+  save. Your comment is anchored to the exact words you selected and shows up in
+  the sidebar on the right.</p>
+
+  <h2>What the agent does</h2>
+  <p>A coding agent watching this document (via <code>watch.py</code> under its
+  background monitor tool, or by polling <code>/api/state</code>) is notified the
+  moment you comment. It can reply inline — its reply appears right under your
+  comment — or it can edit the underlying document and you reload to see the
+  change.</p>
+
+  <h2>Why this exists</h2>
+  <p>Pointing at the exact span you mean — "this sentence is wrong," "what's the
+  benefit here?" — is a far tighter way to give an agent feedback than describing
+  it from across a chat window. This is that loop, for documents.</p>
+
+</div></body></html>
