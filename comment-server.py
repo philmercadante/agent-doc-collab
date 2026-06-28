@@ -20,17 +20,27 @@ Design notes:
   If the doc changes enough that an anchor can't be re-found, the comment still
   shows in the sidebar as "orphaned" — never lost.
 
+Multiple agents, optionally blind:
+- Reviewer identity is a self-declared, arbitrary `author` label — 'claude',
+  'codex', 'gemini', a second human, anything. The server keeps no allow-list;
+  'human' is the only reserved author (what the browser posts).
+- A "blind round" (POST /api/blind {"blind":true}, or --blind, or the sidebar
+  button) makes GET /api/state?as=<label> show that agent only its own + the
+  human's comments. The human reveals (POST /api/blind {"blind":false}) to drop
+  the walls so agents can see and react to each other. Kills anchoring/groupthink.
+
 Usage:
     python3 comment-server.py --doc example.html --port 8802
     python3 comment-server.py --doc example.html --webhook http://localhost:9999/hook
+    python3 comment-server.py --doc example.html --blind   # start a blind round
 
-Agent reply helpers (author=agent → not re-surfaced as human feedback):
-    curl -s http://localhost:8802/api/state | python3 -m json.tool
+Agent reply helpers (author=<your label> → not re-surfaced to you as feedback):
+    curl -s 'http://localhost:8802/api/state?as=claude' | python3 -m json.tool
     curl -s -X POST http://localhost:8802/api/comments/<id>/reply \
          -H 'Content-Type: application/json' \
-         -d '{"text": "your reply", "author": "agent"}'
+         -d '{"text": "your reply", "author": "claude"}'
     curl -s -X POST http://localhost:8802/api/comments/<id>/resolve \
-         -H 'Content-Type: application/json' -d '{"author":"agent"}'
+         -H 'Content-Type: application/json' -d '{"author":"claude"}'
 """
 from __future__ import annotations
 
@@ -42,6 +52,7 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 # Docs and the comment store are resolved relative to the current directory
 # (or pass absolute paths). No project-specific roots.
@@ -56,13 +67,14 @@ class Store:
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.Lock()
-        self.data = {'version': 0, 'next_id': 1, 'comments': []}
+        self.data = {'version': 0, 'next_id': 1, 'comments': [], 'blind': False}
         if path.exists():
             try:
                 self.data = json.loads(path.read_text())
                 self.data.setdefault('version', 0)
                 self.data.setdefault('next_id', 1)
                 self.data.setdefault('comments', [])
+                self.data.setdefault('blind', False)
             except (json.JSONDecodeError, OSError):
                 # Corrupt sidecar: back it up, start fresh rather than crash.
                 try:
@@ -79,6 +91,7 @@ class Store:
     def snapshot(self):
         with self.lock:
             return {'version': self.data['version'],
+                    'blind': self.data['blind'],
                     'comments': self.data['comments']}
 
     def add_comment(self, anchor, text, author):
@@ -129,6 +142,39 @@ class Store:
                 self._flush()
                 return True
             return False
+
+    def set_blind(self, blind):
+        """Flip the round-level blind flag. While blind, /api/state filters
+        each agent's view to its own + human comments (see filter_for_viewer)."""
+        with self.lock:
+            self.data['blind'] = bool(blind)
+            self._flush()
+            return self.data['blind']
+
+
+# A "human" reviewer authors comments as 'human' (what the browser posts). Every
+# other author string is an agent/reviewer label, self-declared and arbitrary —
+# 'claude', 'codex', 'gemini', 'aider', a second human, anything. The server
+# keeps no allow-list; identity is honor-system, which fits the local-trust model.
+HUMAN_AUTHOR = 'human'
+
+
+def is_human(author):
+    return (author or HUMAN_AUTHOR) == HUMAN_AUTHOR
+
+
+def filter_for_viewer(snap, viewer):
+    """Blind view for an agent labelled `viewer`: it sees the human's comments
+    and its own, but NOT other agents' notes (and not their replies on otherwise
+    visible threads). The human's own browser passes no viewer and sees all."""
+    out = []
+    for c in snap['comments']:
+        if is_human(c.get('author')) or c.get('author') == viewer:
+            nc = dict(c)
+            nc['replies'] = [r for r in (c.get('replies') or [])
+                             if is_human(r.get('author')) or r.get('author') == viewer]
+            out.append(nc)
+    return {'version': snap['version'], 'blind': snap['blind'], 'comments': out}
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +233,9 @@ INJECT_CSS = """
   display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 #rc-head h3 { margin:0; font-size:15px; font-weight:700; flex:1; }
 #rc-head .rc-count { font-size:11px; color:#7a7363; background:#efe9dc; border-radius:10px; padding:2px 8px; }
+#rc-blindtog.on { background:#3a2f5a; color:#fff; border-color:#2f255a; }
+#rc-blindbanner { margin:0; padding:9px 14px; font-size:12px; line-height:1.5;
+  background:#efe9f7; color:#3a2f5a; border-bottom:1px solid #ddd2ee; }
 #rc-close { font-size:20px; line-height:1; background:none; border:none; color:#7a7363; cursor:pointer;
   min-width:40px; min-height:40px; }
 
@@ -306,8 +355,10 @@ INJECT_HTML = """
     <span class="rc-count" id="rc-count">0</span>
     <button class="rc-btn small" id="rc-pinbtn" title="Pin a comment to an element / diagram / image">📌 Pin</button>
     <button class="rc-btn small" id="rc-togresolved" title="Show / hide resolved">Hide done</button>
+    <button class="rc-btn small" id="rc-blindtog" title="Blind review: agents only see their own + your comments until you reveal">👁 Reveal</button>
     <button id="rc-close" title="Close">✕</button>
   </div>
+  <div id="rc-blindbanner" hidden>🙈 <b>Blind round.</b> Each agent sees only its own notes and yours. Click <b>Reveal</b> to let them see each other.</div>
   <div id="rc-list"></div>
 </div>
 
@@ -338,7 +389,7 @@ INJECT_JS = r"""
   var root = document.querySelector(CFG.contentSelector) ||
              document.querySelector(".layout") || document.body;
 
-  var state = { version: -1, comments: [] };
+  var state = { version: -1, comments: [], blind: false };
   var activeId = null;
   var pinMode = false;
   var showResolved = true;
@@ -489,8 +540,10 @@ INJECT_JS = r"""
   }
 
   // ---- sidebar list ----
-  function authorTag(a){ var who=(a==="agent")?"Agent":"Reviewer";
-    return '<span class="rc-author '+esc(a)+'">'+esc(who)+'</span>'; }
+  // 'human' shows as "Reviewer"; every other author is a self-declared agent
+  // label (claude, codex, …) — show the label itself so reviewers are distinct.
+  function authorTag(a){ var who=(!a||a==="human")?"Reviewer":a;
+    return '<span class="rc-author '+esc(a||"human")+'">'+esc(who)+'</span>'; }
   function byId(id){ for(var i=0;i<state.comments.length;i++) if(state.comments[i].id===id) return state.comments[i]; return null; }
 
   function updateBadge(){
@@ -686,12 +739,26 @@ INJECT_JS = r"""
   window.addEventListener("orientationchange", function(){ setTimeout(function(){ applyLayout(); renderMarks(); }, 300); });
 
   // ---- polling ----
+  function renderBlind(){
+    var on=!!state.blind;
+    var btn=el("rc-blindtog");
+    btn.classList.toggle("on", on);
+    // Button shows the action it performs: while blind, offer Reveal; otherwise
+    // offer to start a blind round.
+    btn.textContent=on?"👁 Reveal":"🙈 Blind";
+    var banner=el("rc-blindbanner"); if(banner) banner.hidden=!on;
+  }
+  el("rc-blindtog").addEventListener("click", function(){
+    api("POST","/api/blind",{blind:!state.blind,author:"human"},function(ok){ if(ok) refresh(true); });
+  });
+
   function refresh(force){
     api("GET","/api/state",null,function(ok,j){
       if(!ok||!j) return;
-      if(!force && j.version===state.version) return;
-      state.version=j.version; state.comments=j.comments||[];
-      renderMarks(); renderList();
+      var blindChanged=(!!j.blind)!==(!!state.blind);
+      if(!force && !blindChanged && j.version===state.version) return;
+      state.version=j.version; state.comments=j.comments||[]; state.blind=!!j.blind;
+      renderBlind(); renderMarks(); renderList();
     });
   }
 
@@ -734,9 +801,17 @@ def make_handler(store: Store, doc_path: Path, config: dict, on_activity):
                 return {}
 
         def do_GET(self):
-            path = self.path.split('?', 1)[0]
+            parsed = urlparse(self.path)
+            path = parsed.path
             if path == '/api/state':
-                self._json(200, store.snapshot())
+                snap = store.snapshot()
+                # ?as=<label> identifies the requesting agent. While the round is
+                # blind, that agent sees only its own + human comments. No `as`
+                # (the browser) or as=human always sees everything.
+                viewer = (parse_qs(parsed.query).get('as') or [None])[0]
+                if snap['blind'] and viewer and not is_human(viewer):
+                    snap = filter_for_viewer(snap, viewer)
+                self._json(200, snap)
                 return
             if path in ('/', '/' + doc_path.name, '/index.html'):
                 try:
@@ -763,10 +838,15 @@ def make_handler(store: Store, doc_path: Path, config: dict, on_activity):
             body = self._read_body()
             parts = path.strip('/').split('/')
 
+            if path == '/api/blind':
+                blind = store.set_blind(body.get('blind', True))
+                self._json(200, {'blind': blind})
+                return
+
             if path == '/api/comments':
                 anchor = body.get('anchor') or {}
                 c = store.add_comment(anchor, body.get('text', ''), body.get('author', 'human'))
-                if c['author'] != 'agent':
+                if is_human(c['author']):
                     on_activity('comment', c, None)
                 self._json(200, c)
                 return
@@ -781,7 +861,7 @@ def make_handler(store: Store, doc_path: Path, config: dict, on_activity):
                     c = store.add_reply(cid, body.get('text', ''), body.get('author', 'human'))
                     if c is None:
                         self._json(404, {'error': 'no such comment'}); return
-                    if (body.get('author') or 'human') != 'agent':
+                    if is_human(body.get('author')):
                         on_activity('reply', c, c['replies'][-1])
                     self._json(200, c); return
                 if action == 'resolve':
@@ -813,6 +893,9 @@ def main():
                    help='CSS selector for the commentable content root (falls back to <body>)')
     p.add_argument('--webhook', default=None,
                    help='optional URL to POST a JSON event to on each new human comment/reply')
+    p.add_argument('--blind', action='store_true',
+                   help='start in a blind round: each agent (GET /api/state?as=<label>) '
+                        'sees only its own + human comments until the human clicks Reveal')
     p.add_argument('--poll-ms', type=int, default=3000)
     args = p.parse_args()
 
@@ -822,6 +905,8 @@ def main():
     store_path = (Path(args.store).resolve() if args.store
                   else doc_path.with_name(doc_path.name + '.comments.json'))
     store = Store(store_path)
+    if args.blind:
+        store.set_blind(True)
 
     config = {'pollMs': args.poll_ms, 'contentSelector': args.content_selector, 'doc': doc_path.name}
 
@@ -831,8 +916,8 @@ def main():
 
     def on_activity(kind, comment, reply):
         item = reply or comment
-        if item.get('author') == 'agent':
-            return  # the agent's own replies are not feedback to surface
+        if not is_human(item.get('author')):
+            return  # only human feedback is surfaced; agents' notes are not
         a = comment.get('anchor') or {}
         loc = a.get('label') if a.get('type') == 'element' else a.get('quote')
         print(f'[{kind}] #{comment["id"]} on "{snippet(loc, 60)}": {snippet(item["text"], 200)}',

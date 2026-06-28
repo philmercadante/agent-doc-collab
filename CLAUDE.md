@@ -21,25 +21,44 @@ GitHub: https://github.com/philmercadante/agent-doc-collab
    ```
 2. **The human comments** in the browser. Comments persist to a JSON sidecar
    (`<doc>.comments.json`).
-3. **You get woken.** Run `watch.py` under your background/monitor tool (Claude
-   Code's `Monitor`). It baselines existing items on startup (no backlog spam),
-   then prints one line per *new human* comment or reply. Or poll
-   `GET /api/state` and diff the `version` field yourself.
+3. **You get woken.** Run `watch.py` (identifying yourself with `RC_AS`) under
+   your background/monitor tool (Claude Code's `Monitor`). It baselines existing
+   items on startup (no backlog spam), then prints one line per new item *not
+   authored by you*. Or poll `GET /api/state?as=<you>` and diff `version`.
    ```bash
-   RC_STATE_URL=http://localhost:8802/api/state python3 watch.py
+   RC_AS=claude python3 watch.py
    ```
-4. **You reply** via the JSON API. The browser polls and shows your reply
-   inline under the comment. You may instead edit the underlying doc and the
-   human reloads.
+4. **You reply** via the JSON API, under your own label. The browser polls and
+   shows your reply inline. You may instead edit the underlying doc and the human
+   reloads.
    ```bash
    curl -s -X POST http://localhost:8802/api/comments/<id>/reply \
         -H 'Content-Type: application/json' \
-        -d '{"text":"Good catch — fixed.","author":"agent"}'
+        -d '{"text":"Good catch — fixed.","author":"claude"}'
    ```
 
-**Always reply with `author:"agent"`** (or your own agent name). `watch.py`
-filters out non-human authors, so anything you post is not re-surfaced to you
-as new feedback.
+**Reply under your own `author` label** (e.g. `"claude"`). The only reserved
+author is `"human"` (what the browser posts); the server treats every other
+label as an agent, so anything you post is not re-surfaced to you as feedback.
+
+## Multiple agents & blind review
+
+Reviewer identity is a **self-declared, arbitrary `author` label** — `claude`,
+`codex`, `gemini`, a second human, anything. No allow-list; `human` is the only
+reserved author. When several agents review the same doc you usually want
+**independent first opinions** (no anchoring on whoever commented first):
+
+- **Blind round:** `--blind`, `POST /api/blind {"blind":true}`, or the 🙈 sidebar
+  button. While blind, `GET /api/state?as=<label>` returns only that agent's own
+  + the human's comments (and strips other agents' replies on shared threads).
+  The human's browser (no `as`) always sees everything.
+- **Reveal:** the human clicks 👁 Reveal / `POST /api/blind {"blind":false}`.
+  Walls drop; everyone sees all, and each agent's `watch.py` starts surfacing the
+  others' notes so they can compare/rebut.
+
+Pass `RC_AS=<label>` to `watch.py` so it appends `?as=<label>` (blind filtering)
+and never wakes you on your own notes. Identity is honor-system — no auth, which
+suits the local-trust setting.
 
 ## To review a doc you generated
 
@@ -52,11 +71,13 @@ treats as the commentable content root.
 
 | Method | Path | Body | Purpose |
 |---|---|---|---|
-| GET  | `/api/state` | — | `{version, comments[]}` snapshot — poll `version` for changes |
+| GET  | `/api/state` | — | `{version, blind, comments[]}` snapshot — poll `version` |
+| GET  | `/api/state?as=<label>` | — | same, blind-filtered to that agent's view during a blind round |
 | POST | `/api/comments` | `{anchor, text, author}` | add a comment |
 | POST | `/api/comments/<id>/reply` | `{text, author}` | reply to a comment |
 | POST | `/api/comments/<id>/resolve` | `{resolved, author}` | resolve / unresolve |
 | POST | `/api/comments/<id>/delete` | `{author}` | delete |
+| POST | `/api/blind` | `{blind: true\|false}` | start / end the blind round |
 
 A comment is `{id, anchor, text, author, created, resolved, replies[]}`. A
 reply is `{text, author, created}`.
@@ -67,7 +88,13 @@ reply is `{text, author, created}`.
   - `Store` — thread-safe JSON-backed comment store; one lock guards the whole
     file, `version` bumps on every write, atomic temp-file flush. A corrupt
     sidecar is backed up (`.json.corrupt`) and reset rather than crashing.
-    Methods: `add_comment`, `add_reply`, `set_resolved`, `delete`, `snapshot`.
+    Methods: `add_comment`, `add_reply`, `set_resolved`, `delete`, `set_blind`,
+    `snapshot`. The store also holds the round-level `blind` flag.
+  - `is_human` / `filter_for_viewer` — `human` is the only reserved author;
+    everything else is a self-declared agent label. `filter_for_viewer` builds an
+    agent's blind view (own + human comments, other agents' replies stripped)
+    without mutating stored data. `do_GET /api/state` applies it when `blind` is
+    set and an `?as=<label>` is present.
   - `INJECT_CSS` / the injected JS — the in-browser annotation layer (selection
     → "Comment" button → anchored comment, plus the sidebar drawer). Kept as
     plain strings so there's no Python brace-escaping; runtime config is passed
@@ -76,9 +103,10 @@ reply is `{text, author, created}`.
     `/api/state`, `do_POST` handles the comment endpoints.
   - `post_webhook` — optional fire-and-forget POST on each new human comment
     (`--webhook`); most integrations use `watch.py` instead.
-- **`watch.py`** — polls `/api/state`, prints one line per new human item.
-  Env: `RC_STATE_URL` (default `http://localhost:8802/api/state`), `RC_POLL_SEC`
-  (default 3).
+- **`watch.py`** — polls `/api/state?as=<RC_AS>`, prints one line per new item
+  not authored by you. Env: `RC_STATE_URL` (default
+  `http://localhost:8802/api/state`), `RC_POLL_SEC` (default 3), `RC_AS` (your
+  reviewer label, default `agent`).
 
 ## Anchoring
 
@@ -96,6 +124,7 @@ re-found, the comment isn't lost — it shows in the sidebar as "orphaned."
 --store PATH             comment JSON sidecar (default <doc>.comments.json)
 --content-selector CSS   commentable content root (default ".layout"; falls back to <body>)
 --webhook URL            optional JSON event POST on each new human comment/reply
+--blind                  start in a blind round (agents see only own + human until Reveal)
 ```
 
 ## Conventions when working on this repo
@@ -105,7 +134,8 @@ re-found, the comment isn't lost — it shows in the sidebar as "orphaned."
 - The injected CSS/JS lives as plain Python strings in `comment-server.py`;
   per-request config flows through the JSON blob in `build_injection`, not
   string interpolation into the markup.
-- `author` is currently a free-form string defaulting to `"human"`; `watch.py`
-  treats anything ≠ `"agent"` as human-authored. Multi-agent reviewers (e.g.
-  distinct `claude` / `codex` authors) build on this field.
+- `author` is a free-form, self-declared label; `"human"` is the only reserved
+  value (the browser posts it). The server's human/agent split is `is_human()`,
+  and blind filtering keys off the `?as=<label>` viewer — keep both honoring that
+  one reserved name rather than hardcoding specific agent names.
 - Python 3.8+. MIT licensed.

@@ -48,13 +48,13 @@ documents: a tight loop of highlight → comment → the agent answers right the
 python3 comment-server.py --doc example.html --port 8802
 
 # 2. in another terminal, watch for comments (point your agent's monitor at this)
-RC_STATE_URL=http://localhost:8802/api/state python3 watch.py
+RC_AS=claude python3 watch.py        # RC_AS = your reviewer label
 
 # 3. open http://localhost:8802 , highlight some text, leave a comment.
-#    watch.py prints it; the agent replies:
+#    watch.py prints it; the agent replies under its own label:
 curl -s -X POST http://localhost:8802/api/comments/1/reply \
      -H 'Content-Type: application/json' \
-     -d '{"text": "Good catch — fixed.", "author": "agent"}'
+     -d '{"text": "Good catch — fixed.", "author": "claude"}'
 ```
 
 That's the whole loop. The reply appears inline in the browser within a few
@@ -66,27 +66,58 @@ seconds.
 > integration guide (the loop, API, code map, and conventions).
 
 Give your agent two facts and it runs the loop itself:
-- **Watch:** run `watch.py` under your monitor/background-task tool; each line is
-  a new comment to address.
+- **Watch:** run `watch.py` (with `RC_AS=<your-label>`) under your
+  monitor/background-task tool; each line is a new comment to address.
 - **Reply:** `POST /api/comments/<id>/reply` with `{"text": "...", "author":
-  "agent"}`. Use `author: "agent"` so your replies aren't re-surfaced as new
-  feedback.
+  "<your-label>"}`. Replying under your own label means your replies aren't
+  re-surfaced to you as new feedback.
 
 To review a doc you generated: render it to a standalone HTML file (wrap the
 content in a `.layout` element, or pass `--content-selector`), serve it, share
 the URL, and respond to comments as they land.
 
+## Multiple agents, and blind review
+
+Reviewer identity is just a **self-declared `author` label** — `claude`,
+`codex`, `gemini`, `aider`, a second human, anything. The server keeps no
+allow-list; the only reserved author is `human` (what the browser posts). So any
+agent or harness can join a review by labelling its comments and replies.
+
+When more than one agent reviews the same doc, you often want them to form
+**independent** opinions first, instead of the second agent anchoring on the
+first one's take. That's a **blind round**:
+
+- Start blind: `--blind`, or `POST /api/blind {"blind": true}`, or the 🙈 button
+  in the sidebar.
+- While blind, an agent fetches `GET /api/state?as=<label>` and sees only **its
+  own** comments **and the human's** — never another agent's notes (or their
+  replies on a shared thread). The human's own browser always sees everything.
+- **Reveal:** the human clicks 👁 Reveal (`POST /api/blind {"blind": false}`).
+  The walls drop; every agent now sees all comments and — via `watch.py` — starts
+  getting woken on each other's notes, so they can compare and rebut.
+
+Identity is honor-system (no auth), which suits the local-trust setting. Point
+each agent's watcher at itself with `RC_AS`:
+
+```bash
+RC_AS=claude python3 watch.py    # one terminal
+RC_AS=codex  python3 watch.py    # another
+```
+
 ## HTTP API
 
 | Method | Path | Body | Purpose |
 |---|---|---|---|
-| GET  | `/api/state` | — | `{version, comments[]}` snapshot (poll `version` for changes) |
+| GET  | `/api/state` | — | `{version, blind, comments[]}` snapshot (poll `version`) |
+| GET  | `/api/state?as=<label>` | — | same, but blind-filtered to that agent's view during a blind round |
 | POST | `/api/comments` | `{anchor, text, author}` | add a comment |
 | POST | `/api/comments/<id>/reply` | `{text, author}` | reply to a comment |
 | POST | `/api/comments/<id>/resolve` | `{resolved, author}` | resolve/unresolve |
 | POST | `/api/comments/<id>/delete` | `{author}` | delete |
+| POST | `/api/blind` | `{blind: true\|false}` | start / end the blind round |
 
-A comment is `{id, anchor, text, author, created, resolved, replies[]}`.
+A comment is `{id, anchor, text, author, created, resolved, replies[]}`. Use your
+own label as `author` (e.g. `"claude"`); `human` is reserved for the browser.
 
 ## Options
 
@@ -97,6 +128,7 @@ A comment is `{id, anchor, text, author, created, resolved, replies[]}`.
 --store PATH             comment JSON sidecar (default <doc>.comments.json)
 --content-selector CSS   commentable content root (default ".layout"; falls back to <body>)
 --webhook URL            optional: POST a JSON event on each new human comment/reply
+--blind                  start in a blind round (agents see only own + human until Reveal)
 ```
 
 ## Anchoring
