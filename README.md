@@ -62,6 +62,9 @@ seconds.
 
 ## Using it with a coding agent
 
+> Coding agents working in this repo: see [CLAUDE.md](CLAUDE.md) for a full
+> integration guide (the loop, API, code map, and conventions).
+
 Give your agent two facts and it runs the loop itself:
 - **Watch:** run `watch.py` under your monitor/background-task tool; each line is
   a new comment to address.
