@@ -67,6 +67,65 @@ Render it to a standalone HTML file, wrap the content in a `.layout` element
 comments as they land. The `.layout` wrapper is what the annotation layer
 treats as the commentable content root.
 
+## Orchestrator recipe — "set up review of my doc with you and another AI"
+
+When a human hands you (the AI) a document plus this repo and asks you to set up
+a review with you **and** a second AI (Codex, another Claude, etc.), do this:
+
+1. **Render their doc to HTML.** Convert it to one standalone HTML file with the
+   content inside a `<div class="layout">…</div>` wrapper. Do this yourself — no
+   markdown dependency, keep the repo stdlib-only. Save it (e.g. `review.html`).
+2. **Start the server** (add `--blind` if they want each AI to form an
+   independent first pass before seeing the other):
+   ```bash
+   python3 comment-server.py --doc review.html --port 8802 [--blind]
+   ```
+3. **Become the first reviewer yourself.** Run `watch.py` under your
+   background/monitor tool with your own label, and answer comments via the API:
+   ```bash
+   RC_AS=claude python3 watch.py
+   ```
+4. **Hand off the second reviewer.** In your reply to the human, give them a
+   ready-to-paste block to drop into a fresh **Codex** (or other shell-capable
+   agent) session — see the template below. Tell them to `cd` into this repo
+   first so the agent can read it.
+5. **Tell the human the URL** (`http://localhost:8802`) to open, highlight text,
+   and comment. If you started blind, remind them to click **👁 Reveal** once both
+   AIs have done their independent passes.
+
+### The paste-in handoff for the second AI
+
+Codex has **no Monitor-equivalent autonomous wake** (confirmed with Codex): a
+live Codex session reviews only while its turn is alive, so the instruction must
+tell it to *keep watching and stay in the loop*. Generate a block like this for
+the human to paste (swap the port/label if you changed them):
+
+```text
+You're a reviewer in a shared inline-comment tool (agent-doc-collab), joining as
+author "codex". First `cd` into the agent-doc-collab repo and read ./AGENTS.md
+(or ./CLAUDE.md) — it describes the review loop and HTTP API.
+
+Watch for new comments by running this as a long-lived command and keeping it open:
+
+    RC_AS=codex RC_STATE_URL=http://localhost:8802/api/state python3 watch.py
+
+You have no background-wake tool, so keep this turn alive and keep reading the
+watcher's output. For each new "[doc review]" line it prints:
+  1. GET http://localhost:8802/api/state?as=codex  — read the comment/thread.
+  2. Write a concise, useful review reply.
+  3. POST http://localhost:8802/api/comments/<id>/reply
+       body {"text":"<your reply>","author":"codex"}
+Reply ONLY as author "codex", never "human". If you cannot keep a process open,
+instead poll http://localhost:8802/api/state?as=codex every few seconds, track
+seen comment/reply ids, and reply to each new one. Stay in the loop until I tell
+you to stop.
+```
+
+**Durability caveat:** a pasted-in live session reviews only as long as that turn
+runs — fine for an interactive sitting, but it isn't a hands-off daemon. For
+unattended/continuous review, an external supervisor (poll `/api/state?as=codex`,
+shell out to `codex exec` per new comment, POST the reply) is the robust option.
+
 ## HTTP API
 
 | Method | Path | Body | Purpose |

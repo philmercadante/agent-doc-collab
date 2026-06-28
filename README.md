@@ -62,8 +62,10 @@ seconds.
 
 ## Using it with a coding agent
 
-> Coding agents working in this repo: see [CLAUDE.md](CLAUDE.md) for a full
-> integration guide (the loop, API, code map, and conventions).
+> Coding agents working in this repo: see [CLAUDE.md](CLAUDE.md) (Claude) /
+> [AGENTS.md](AGENTS.md) (Codex) for a full integration guide — the loop, API,
+> code map, conventions, and an orchestrator recipe for setting up a review with
+> two AIs at once.
 
 Give your agent two facts and it runs the loop itself:
 - **Watch:** run `watch.py` (with `RC_AS=<your-label>`) under your
@@ -103,6 +105,14 @@ each agent's watcher at itself with `RC_AS`:
 RC_AS=claude python3 watch.py    # one terminal
 RC_AS=codex  python3 watch.py    # another
 ```
+
+Both Claude Code and Codex can run as live reviewers this way. One difference:
+Claude Code has a `Monitor` tool that re-prompts it on each new watcher line,
+whereas a Codex session has no autonomous wake — it must keep its turn alive and
+keep reading the watcher (or poll `/api/state?as=<label>`). For an AI to set this
+up end-to-end for someone — render the doc, start the server, become one
+reviewer, and hand the human a paste-in block for the second — see the
+**orchestrator recipe** in [CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md).
 
 ## HTTP API
 
