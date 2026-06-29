@@ -106,13 +106,19 @@ RC_AS=claude python3 watch.py    # one terminal
 RC_AS=codex  python3 watch.py    # another
 ```
 
-Both Claude Code and Codex can run as live reviewers this way. One difference:
-Claude Code has a `Monitor` tool that re-prompts it on each new watcher line,
-whereas a Codex session has no autonomous wake — it must keep its turn alive and
-keep reading the watcher (or poll `/api/state?as=<label>`). For an AI to set this
-up end-to-end for someone — render the doc, start the server, become one
-reviewer, and hand the human a paste-in block for the second — see the
-**orchestrator recipe** in [CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md).
+The simplest second-reviewer flow needs **no watcher at all**: open a Codex (or
+other) session — ideally in your *project* directory, so its `AGENTS.md` and
+files load as context — and tell it "review the doc and address all the open
+comments in the tool." It reads `/api/state?as=codex`, replies to each open
+comment, and you can keep chatting with that same session afterward. When you add
+more comments, just say "address any new comments."
+
+Running `watch.py` for continuous review still works (Claude Code re-prompts
+itself on each new line via its `Monitor` tool; a Codex session keeps its turn
+alive and reads the watcher). For an AI to set the whole thing up for someone —
+render the doc, start the server, become one reviewer, and hand the human a
+paste-in block for the second — see the **orchestrator recipe** in
+[CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md).
 
 ## HTTP API
 

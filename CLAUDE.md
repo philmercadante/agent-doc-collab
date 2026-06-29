@@ -86,45 +86,55 @@ a review with you **and** a second AI (Codex, another Claude, etc.), do this:
    RC_AS=claude python3 watch.py
    ```
 4. **Hand off the second reviewer.** In your reply to the human, give them a
-   ready-to-paste block to drop into a fresh **Codex** (or other shell-capable
-   agent) session — see the template below. Tell them to `cd` into this repo
-   first so the agent can read it.
+   ready-to-paste block to drop into a fresh **Codex** (or other) session — see
+   below. Two things that matter:
+   - **Project context:** have them open that session in their **project
+     directory** (not this repo) — Codex auto-loads that project's `AGENTS.md`
+     and files, so the reviewer knows the project, not just the doc. For extra
+     review-specific context, drop a `review-context.md` and tell it to read that
+     first.
+   - The session only needs to **reach the comment server** — fine for a local
+     session hitting `localhost`; a cloud session needs a tunnel.
 5. **Tell the human the URL** (`http://localhost:8802`) to open, highlight text,
    and comment. If you started blind, remind them to click **👁 Reveal** once both
    AIs have done their independent passes.
 
 ### The paste-in handoff for the second AI
 
-Codex has **no Monitor-equivalent autonomous wake** (confirmed with Codex): a
-live Codex session reviews only while its turn is alive, so the instruction must
-tell it to *keep watching and stay in the loop*. Generate a block like this for
-the human to paste (swap the port/label if you changed them):
+**Default = on-request.** Codex has **no Monitor-equivalent autonomous wake**
+(confirmed with Codex), so don't design around per-comment wake — the human just
+re-runs the prompt when they've added comments. This is the simplest path and
+needs no watcher. Generate a block like this (swap port / label / context path as
+needed):
 
 ```text
-You're a reviewer in a shared inline-comment tool (agent-doc-collab), joining as
-author "codex". First `cd` into the agent-doc-collab repo and read ./AGENTS.md
-(or ./CLAUDE.md) — it describes the review loop and HTTP API.
+You're a reviewer in a shared inline-comment doc tool (agent-doc-collab), joining
+as author "codex". Read any project AGENTS.md / context here first, so you review
+with full project context — not just the doc.
 
-Watch for new comments by running this as a long-lived command and keeping it open:
-
-    RC_AS=codex RC_STATE_URL=http://localhost:8802/api/state python3 watch.py
-
-You have no background-wake tool, so keep this turn alive and keep reading the
-watcher's output. For each new "[doc review]" line it prints:
-  1. GET http://localhost:8802/api/state?as=codex  — read the comment/thread.
-  2. Write a concise, useful review reply.
-  3. POST http://localhost:8802/api/comments/<id>/reply
+The doc is served at http://localhost:8802 (read the rendered page there for the
+full text). To review:
+1. GET http://localhost:8802/api/state?as=codex  — the comments + threads.
+2. For every comment you ("codex") have NOT already replied to, post a concise,
+   useful reply:
+     POST http://localhost:8802/api/comments/<id>/reply
        body {"text":"<your reply>","author":"codex"}
-Reply ONLY as author "codex", never "human". If you cannot keep a process open,
-instead poll http://localhost:8802/api/state?as=codex every few seconds, track
-seen comment/reply ids, and reply to each new one. Stay in the loop until I tell
-you to stop.
+   You may also raise your own points as new comments (POST /api/comments with an
+   anchor). Reply ONLY as author "codex", never "human".
+3. Tell me when you've addressed everything open.
+
+Later I'll just say "address any new comments" — repeat steps 1–2 for the ones
+you haven't answered yet.
 ```
 
-**Durability caveat:** a pasted-in live session reviews only as long as that turn
-runs — fine for an interactive sitting, but it isn't a hands-off daemon. For
-unattended/continuous review, an external supervisor (poll `/api/state?as=codex`,
-shell out to `codex exec` per new comment, POST the reply) is the robust option.
+After the review the human can **keep talking to this same Codex session** — it
+still holds the doc + thread context, so discussion can continue outside the tool.
+
+**Want it continuous instead of on-request?** Have that session run
+`RC_AS=codex python3 watch.py` and stay in the loop (it prints one line per new
+comment). For a true hands-off daemon, an external supervisor (poll
+`/api/state?as=codex` + `codex exec` per comment) is the robust option — possible,
+but not shipped.
 
 ## HTTP API
 

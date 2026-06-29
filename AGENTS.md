@@ -13,7 +13,26 @@ and leaves anchored inline comments; you (an agent) watch for new comments and
 reply via an HTTP JSON API. Google-Docs-style margin comments, AI on the other
 side.
 
-## The loop
+## On-request review (the simplest path)
+
+You don't need a watcher. When a human asks you to review, just:
+
+1. **Bring your context.** Read any project `AGENTS.md` / context files in your
+   working directory first, so you review with full project context — not only
+   the doc. (Tip: run in the **project's** directory, not this repo, so that
+   project's `AGENTS.md` auto-loads.)
+2. **Read the state.** `GET http://localhost:8802/api/state?as=codex` for the
+   comments + threads, and open the served URL for the full doc text.
+3. **Answer everything open.** For every comment you (`codex`) haven't already
+   replied to, POST a concise reply (see below). You may also raise your own
+   points as new comments. Reply ONLY as `codex`, never `human`.
+4. When the human later says "address any new comments," repeat 2–3 for the ones
+   you haven't answered yet.
+
+Because you're a normal interactive session, the human can **keep talking to you
+after the review** — you still hold the doc + thread context.
+
+## The watch loop (optional, for continuous review)
 
 1. **Identify yourself.** Pick an `author` label (e.g. `codex`). `human` is the
    only reserved author (what the browser posts); every other label is an agent.
@@ -33,16 +52,15 @@ side.
 ## Codex-specific: no background-wake tool
 
 Unlike Claude Code (whose `Monitor` tool re-prompts the agent on each new line of
-a background command), Codex has **no autonomous per-line wake**. So a live Codex
-session reviews only while its turn is active. To act as a continuous reviewer:
+a background command), Codex has **no autonomous per-line wake**. That's why the
+default here is **on-request review** (above): the human just asks you to address
+the open comments, and again when they add more. Don't design around per-comment
+wake.
 
-- Run `watch.py` (or the poll) as a long-lived command, **keep the turn alive**,
-  and keep reading its output — replying to each new `[doc review]` line.
-- Do **not** end the turn just because the watcher is armed. Stay in the loop
-  until the human says to stop.
-- For hands-off / unattended review, the robust pattern is an external
-  supervisor: poll `/api/state?as=codex` and shell out to `codex exec` per new
-  comment, then POST the reply.
+If you do want continuous review in one sitting, run `watch.py` and **keep the
+turn alive**, replying to each new `[doc review]` line until told to stop. A true
+hands-off daemon (an external supervisor polling `/api/state?as=codex` and
+shelling out to `codex exec` per comment) is possible but not shipped.
 
 ## Blind review
 
