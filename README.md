@@ -6,7 +6,8 @@ agent watch for those comments and reply — inline, comment by comment, or by
 editing the doc itself. Think Google-Docs-style margin comments, but the
 reviewer on the other side is your AI agent.
 
-Stdlib-only Python. No dependencies, no build step, two small files.
+Stdlib-only Python. No dependencies, no build step. Runs on Windows, macOS, and
+Linux.
 
 ---
 
@@ -74,9 +75,22 @@ Give your agent two facts and it runs the loop itself:
   "<your-label>"}`. Replying under your own label means your replies aren't
   re-surfaced to you as new feedback.
 
-To review a doc you generated: render it to a standalone HTML file (wrap the
-content in a `.layout` element, or pass `--content-selector`), serve it, share
-the URL, and respond to comments as they land.
+To review a doc you generated: serve it and respond to comments as they land. You
+don't need to pre-render — `--doc` accepts **Markdown, plain text, `.docx` (Word),
+and HTML**, and the server renders non-HTML through `render.py` into the right
+`.layout` page (PDF too, if `pdftotext` is on PATH; otherwise export to
+`.docx`/`.txt` first). For HTML you author yourself, wrap the content in a
+`.layout` element or pass `--content-selector`.
+
+```bash
+python comment-server.py --doc report.docx     # Word, Markdown, txt, html, …
+```
+
+**Cross-platform:** the server, `watch.py`, and `render.py` are stdlib Python with
+no shell-specific code — they run on Windows, macOS, and Linux. The only
+dependency is a Python 3.8+ interpreter (`python` / `py -3` on Windows, `python3`
+elsewhere). The reviewing "AI" needs to be a coding agent with a shell +
+filesystem (Claude Code, Codex CLI) to start the server and call the API.
 
 ## Multiple agents, and blind review
 

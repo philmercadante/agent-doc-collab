@@ -47,12 +47,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+# render.py lives next to this file; ensure it imports regardless of CWD.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import render  # noqa: E402  (after sys.path tweak)
 
 # Docs and the comment store are resolved relative to the current directory
 # (or pass absolute paths). No project-specific roots.
@@ -840,8 +845,15 @@ def make_handler(store: Store, doc_path: Path, config: dict, on_activity):
                 return
             if path in ('/', '/' + doc_path.name, '/index.html'):
                 try:
-                    html = doc_path.read_text()
-                except OSError as e:
+                    # .html/.htm is served as-is; anything else (md/txt/docx/pdf)
+                    # goes through render.py so there is ONE conversion code path
+                    # and the page always has the `.layout` wrapper. Read fresh
+                    # each request, so editing the source + reloading still works.
+                    if doc_path.suffix.lower() in render.HTML_EXTS:
+                        html = doc_path.read_text(encoding='utf-8', errors='replace')
+                    else:
+                        html = render.render_document(doc_path)
+                except (OSError, ValueError) as e:
                     self._json(500, {'error': str(e)})
                     return
                 inj = build_injection(config)
@@ -908,7 +920,8 @@ def make_handler(store: Store, doc_path: Path, config: dict, on_activity):
 def main():
     p = argparse.ArgumentParser(description='agent-doc-collab inline comment server.')
     p.add_argument('--doc', default='example.html',
-                   help='HTML doc to serve (path relative to CWD, or absolute)')
+                   help='document to serve. .html/.htm served as-is; .md/.txt/.docx '
+                        '(and .pdf via pdftotext) are rendered to HTML via render.py')
     p.add_argument('--port', type=int, default=8802)
     p.add_argument('--host', default='127.0.0.1',
                    help='bind host (use 0.0.0.0 to reach it from another device, e.g. over a LAN/VPN)')

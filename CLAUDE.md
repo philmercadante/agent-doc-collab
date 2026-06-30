@@ -72,20 +72,23 @@ treats as the commentable content root.
 When a human hands you (the AI) a document plus this repo and asks you to set up
 a review with you **and** a second AI (Codex, another Claude, etc.), do this:
 
-1. **Render their doc to HTML.** Convert it to one standalone HTML file with the
-   content inside a `<div class="layout">…</div>` wrapper. Do this yourself — no
-   markdown dependency, keep the repo stdlib-only. Save it (e.g. `review.html`).
-2. **Start the server** (add `--blind` if they want each AI to form an
-   independent first pass before seeing the other):
+1. **Point the server straight at their file — don't hand-roll HTML.** The
+   server renders Markdown, plain text, `.docx` (Word), and HTML itself through
+   `render.py` (one stdlib code path, so every session yields the same `.layout`
+   page). Just pass the file (`--blind` if they want each AI to form an
+   independent first pass first):
    ```bash
-   python3 comment-server.py --doc review.html --port 8802 [--blind]
+   python comment-server.py --doc their-file.docx --port 8802 [--blind]
    ```
-3. **Become the first reviewer yourself.** Run `watch.py` under your
+   PDF needs `pdftotext` on PATH; without it, export to `.docx`/`.txt`, or read
+   the PDF yourself and save the text as `.md`, then point at that. (Use `python`
+   on Windows, `python3` on macOS/Linux.)
+2. **Become the first reviewer yourself.** Run `watch.py` under your
    background/monitor tool with your own label, and answer comments via the API:
    ```bash
-   RC_AS=claude python3 watch.py
+   RC_AS=claude python watch.py
    ```
-4. **Hand off the second reviewer.** In your reply to the human, give them a
+3. **Hand off the second reviewer.** In your reply to the human, give them a
    ready-to-paste block to drop into a fresh **Codex** (or other) session — see
    below. Two things that matter:
    - **Project context:** have them open that session in their **project
@@ -95,7 +98,7 @@ a review with you **and** a second AI (Codex, another Claude, etc.), do this:
      first.
    - The session only needs to **reach the comment server** — fine for a local
      session hitting `localhost`; a cloud session needs a tunnel.
-5. **Tell the human the URL** (`http://localhost:8802`) to open, highlight text,
+4. **Tell the human the URL** (`http://localhost:8802`) to open, highlight text,
    and comment. If you started blind, remind them to click **👁 Reveal** once both
    AIs have done their independent passes.
 
@@ -176,6 +179,24 @@ reply is `{text, author, created}`.
   not authored by you. Env: `RC_STATE_URL` (default
   `http://localhost:8802/api/state`), `RC_POLL_SEC` (default 3), `RC_AS` (your
   reviewer label, default `agent`).
+- **`render.py`** — stdlib, cross-platform document → HTML. `render_document(path)`
+  returns a full `.layout` page; handlers for Markdown, plain text, `.docx` (zip +
+  XML, no `python-docx`), HTML passthrough, and PDF (via `pdftotext` if present).
+  Used as a CLI (`--in/--out`) **and** imported by the server, so non-HTML `--doc`
+  files convert through this one path — agents never hand-roll the HTML.
+
+## Cross-platform / Windows
+
+Everything is **stdlib Python, no shell-specific code** — the server, `watch.py`,
+and `render.py` run unchanged on Windows, macOS, and Linux. Two things to tell a
+Windows user:
+- **The only dependency is a Python 3.8+ interpreter.** macOS usually has one;
+  on Windows they install Python (or use the `py` launcher). Invoke with `python`
+  (or `py -3`) on Windows, `python3` on macOS/Linux.
+- **The "AI" must be a coding agent with a shell + filesystem** (Claude Code,
+  Codex CLI) — it's what starts the server and hits the API. A plain desktop chat
+  app with no tool access can't launch a local server. All-local means everything
+  talks to `localhost`, so there's nothing to expose.
 
 ## Anchoring
 
