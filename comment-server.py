@@ -554,6 +554,17 @@ INJECT_JS = r"""
   function renderList(){
     var list=el("rc-list");
     updateBadge();
+    // Preserve any in-progress reply you're typing across this rebuild, so a
+    // comment landing from another reviewer (which triggers a refresh) can't wipe
+    // it. We snapshot each open reply box's text / open-state / focus + caret and
+    // the list scroll position, then restore them after re-rendering.
+    var drafts={}, openBoxes={}, focusedId=null, caret=null, scrollTop=list.scrollTop;
+    list.querySelectorAll(".rc-replybox").forEach(function(box){
+      var id=box.getAttribute("data-rc-box"), ta=box.querySelector("textarea");
+      if(ta && ta.value) drafts[id]=ta.value;
+      if(box.classList.contains("open")) openBoxes[id]=true;
+      if(ta && document.activeElement===ta){ focusedId=id; caret=[ta.selectionStart, ta.selectionEnd]; }
+    });
     var shown=state.comments.filter(function(c){return showResolved||!c.resolved;});
     if(!shown.length){
       list.innerHTML='<div class="rc-empty">No comments yet.<br><br>'+
@@ -586,6 +597,20 @@ INJECT_JS = r"""
       html+='</div></div>';
     });
     list.innerHTML=html;
+    // Restore the snapshotted drafts / open-state / focus + caret / scroll.
+    Object.keys(drafts).forEach(function(id){
+      var box=list.querySelector('[data-rc-box="'+id+'"]'); if(!box) return;
+      var ta=box.querySelector("textarea"); if(ta) ta.value=drafts[id];
+    });
+    Object.keys(openBoxes).forEach(function(id){
+      var box=list.querySelector('[data-rc-box="'+id+'"]'); if(box) box.classList.add("open");
+    });
+    if(focusedId!=null){
+      var box=list.querySelector('[data-rc-box="'+focusedId+'"]');
+      var ta=box&&box.querySelector("textarea");
+      if(ta){ ta.focus(); try{ ta.setSelectionRange(caret[0], caret[1]); }catch(e){} }
+    }
+    list.scrollTop=scrollTop;
   }
 
   function setActive(id, scroll){
