@@ -61,6 +61,38 @@ curl -s -X POST http://localhost:8802/api/comments/1/reply \
 That's the whole loop. The reply appears inline in the browser within a few
 seconds.
 
+## Hub mode — one server, many docs
+
+If you review docs all the time, running a fresh server on a fresh port per doc
+gets old. `hub.py` is one always-on server with an index page and per-doc
+reviews under it:
+
+```bash
+# run the hub once (e.g. under launchd/systemd)
+python3 hub.py --port 8800 --host 0.0.0.0 --data-dir ./hub-data
+
+# register a doc — one call, no process management
+curl -s -X POST http://localhost:8800/api/docs \
+     -H 'Content-Type: application/json' \
+     -d '{"path": "/abs/path/spec.md", "title": "Foo spec"}'
+# -> {"slug": "foo-spec", "url": "/d/foo-spec/", ...}
+
+# an agent watches ONE doc with the unchanged watcher
+RC_AS=claude RC_STATE_URL=http://localhost:8800/d/foo-spec/api/state python3 watch.py
+```
+
+- `/` is the index: every registered doc, newest first, with open-comment
+  counts — it doubles as your review archive.
+- `/d/<slug>/` is exactly the single-doc experience (same annotation layer,
+  blind rounds, multi-agent labels); the comment API lives at
+  `/d/<slug>/api/...` with the same contract as `comment-server.py`.
+- Comment sidecars keep the same JSON format. Pass `"store"` when registering
+  to adopt an existing sidecar (e.g. from a past `comment-server.py` review)
+  in place; `POST /api/docs/<slug>/archive` hides a finished review from the
+  active list without deleting anything.
+- `hub.py add <path>` / `hub.py list` do the same from a shell — the running
+  hub picks up registry changes without a reload.
+
 ## Using it with a coding agent
 
 > Coding agents working in this repo: see [CLAUDE.md](CLAUDE.md) (Claude) /

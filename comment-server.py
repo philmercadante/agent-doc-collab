@@ -391,6 +391,7 @@ INJECT_JS = r"""
   "use strict";
   var CFG = window.RC_CONFIG || {};
   var POLL = CFG.pollMs || 3000;
+  var API = CFG.apiBase || "";   // hub mode: per-doc prefix like "/d/<slug>"
   var root = document.querySelector(CFG.contentSelector) ||
              document.querySelector(".layout") || document.body;
 
@@ -641,15 +642,15 @@ INJECT_JS = r"""
       var box=document.querySelector('[data-rc-box="'+id+'"]'); if(box) box.classList.toggle("open"); return; }
     if((id=t.getAttribute("data-rc-resolve"))){
       var c=byId(parseInt(id,10));
-      api("POST","/api/comments/"+id+"/resolve",{resolved:!(c&&c.resolved),author:"human"},function(ok){ if(ok) refresh(true); });
+      api("POST",API+"/api/comments/"+id+"/resolve",{resolved:!(c&&c.resolved),author:"human"},function(ok){ if(ok) refresh(true); });
       return; }
     if((id=t.getAttribute("data-rc-del"))){
-      if(confirm("Delete this comment?")) api("POST","/api/comments/"+id+"/delete",{author:"human"},function(ok){ if(ok) refresh(true); });
+      if(confirm("Delete this comment?")) api("POST",API+"/api/comments/"+id+"/delete",{author:"human"},function(ok){ if(ok) refresh(true); });
       return; }
     if((id=t.getAttribute("data-rc-replysend"))){
       var ta=document.querySelector('[data-rc-box="'+id+'"] textarea');
       var txt=ta&&ta.value.trim(); if(!txt) return;
-      api("POST","/api/comments/"+id+"/reply",{text:txt,author:"human"},function(ok){ if(ok){ ta.value=""; refresh(true);} });
+      api("POST",API+"/api/comments/"+id+"/reply",{text:txt,author:"human"},function(ok){ if(ok){ ta.value=""; refresh(true);} });
       return; }
     var card=t.closest && t.closest(".rc-card");
     if(card) setActive(parseInt(card.getAttribute("data-rc-id"),10), false);
@@ -715,7 +716,7 @@ INJECT_JS = r"""
     if(!txt){ toast("Type a comment first"); el("rc-composer-text").focus(); return; }
     if(!composerAnchor){ toast("Lost the anchor — please reselect"); closeComposer(); return; }
     var btn=el("rc-composer-save"); btn.disabled=true;
-    api("POST","/api/comments",{anchor:composerAnchor,text:txt,author:"human"},function(ok){
+    api("POST",API+"/api/comments",{anchor:composerAnchor,text:txt,author:"human"},function(ok){
       btn.disabled=false;
       if(ok){ closeComposer(); try{ window.getSelection().removeAllRanges(); }catch(e){}
               toast("Comment added"); refresh(true); }
@@ -779,11 +780,11 @@ INJECT_JS = r"""
     var banner=el("rc-blindbanner"); if(banner) banner.hidden=!on;
   }
   el("rc-blindtog").addEventListener("click", function(){
-    api("POST","/api/blind",{blind:!state.blind,author:"human"},function(ok){ if(ok) refresh(true); });
+    api("POST",API+"/api/blind",{blind:!state.blind,author:"human"},function(ok){ if(ok) refresh(true); });
   });
 
   function refresh(force){
-    api("GET","/api/state",null,function(ok,j){
+    api("GET",API+"/api/state",null,function(ok,j){
       if(!ok||!j) return;
       var blindChanged=(!!j.blind)!==(!!state.blind);
       if(!force && !blindChanged && j.version===state.version) return;
