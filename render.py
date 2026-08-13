@@ -89,6 +89,45 @@ def _inline(s: str) -> str:
     return s
 
 
+def _table_cells(line: str) -> list:
+    """Split a GFM table row into cells, dropping the optional outer pipes."""
+    s = line.strip()
+    s = re.sub(r'^\|', '', s)
+    s = re.sub(r'\|$', '', s)
+    return [c.strip() for c in s.split('|')]
+
+
+def _is_table_sep(line: str) -> bool:
+    """True for a GFM header-separator row: | --- | :--: | (dashes + optional
+    colons for alignment, optional outer pipes)."""
+    if '|' not in line and '-' not in line:
+        return False
+    cells = [c for c in _table_cells(line) if c != '']
+    return bool(cells) and all(re.fullmatch(r':?-+:?', c) for c in cells)
+
+
+def _render_table(header: str, sep: str, body: list) -> str:
+    aligns = []
+    for c in _table_cells(sep):
+        left, right = c.startswith(':'), c.endswith(':')
+        aligns.append('center' if left and right else
+                      'right' if right else 'left' if left else '')
+
+    def row(tag: str, cells: list) -> str:
+        tds = []
+        for j, c in enumerate(cells):
+            a = aligns[j] if j < len(aligns) else ''
+            style = f' style="text-align:{a}"' if a else ''
+            tds.append(f'<{tag}{style}>' + _inline(c) + f'</{tag}>')
+        return '<tr>' + ''.join(tds) + '</tr>'
+
+    parts = ['<table><thead>', row('th', _table_cells(header)), '</thead><tbody>']
+    for bl in body:
+        parts.append(row('td', _table_cells(bl)))
+    parts.append('</tbody></table>')
+    return ''.join(parts)
+
+
 def md_to_body(text: str) -> str:
     out, para = [], []
     list_type = None          # 'ul' | 'ol' | None
@@ -111,7 +150,12 @@ def md_to_body(text: str) -> str:
             out.append('<blockquote>' + _inline(' '.join(quote_buf)) + '</blockquote>')
             quote_buf.clear()
 
-    for raw in text.split('\n'):
+    lines = text.split('\n')
+    skip = 0
+    for idx, raw in enumerate(lines):
+        if skip:
+            skip -= 1
+            continue
         line = raw.rstrip('\n')
         fence = re.match(r'^\s*```(.*)$', line)
         if fence:
@@ -143,6 +187,18 @@ def md_to_body(text: str) -> str:
             flush_para(); flush_list()
             quote_buf.append(q.group(1)); continue
         flush_quote()
+
+        # GFM pipe table: a row containing '|' immediately followed by a
+        # --- separator row. Consume the header + separator + contiguous body.
+        if '|' in line and idx + 1 < len(lines) and _is_table_sep(lines[idx + 1]):
+            flush_para(); flush_list()
+            body = []
+            j = idx + 2
+            while j < len(lines) and lines[j].strip() and '|' in lines[j]:
+                body.append(lines[j]); j += 1
+            out.append(_render_table(line, lines[idx + 1], body))
+            skip = j - idx - 1   # skip the separator + body rows already consumed
+            continue
 
         m = re.match(r'^\s*([-*+])\s+(.*)$', line)
         if m:
