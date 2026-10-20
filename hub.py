@@ -202,30 +202,48 @@ def render_index(reg_data: dict, stores: StoreCache) -> str:
         except Exception:
             return 0, 0
 
-    def row(slug, e):
+    def row(slug, e, is_archived=False):
         open_, total = counts(slug, e)
         badge = (f'<span class="badge{" zero" if not open_ else ""}">'
                  f'{open_}</span>')
         meta = f'{e.get("added", "")} · {total} comment{"s" if total != 1 else ""}'
-        return (f'<a class="doc" href="/d/{slug}/">{badge}'
+        action = 'unarchive' if is_archived else 'archive'
+        label = 'Unarchive' if is_archived else 'Archive'
+        btn = (f'<button class="arch" title="{label} this doc" '
+               f'onclick="arch(event, \'{slug}\', \'{action}\')">{label}</button>')
+        return (f'<div class="docrow">'
+                f'<a class="doc" href="/d/{slug}/">{badge}'
                 f'<div class="t">{e.get("title", slug)}</div>'
-                f'<div class="m">{meta}</div></a>')
+                f'<div class="m">{meta}</div></a>{btn}</div>')
 
     newest_first = sorted(docs.items(), key=lambda kv: kv[1].get('added', ''),
                           reverse=True)
     active = [row(s, e) for s, e in newest_first if e.get('status') != 'archived']
-    archived = [row(s, e) for s, e in newest_first if e.get('status') == 'archived']
+    archived = [row(s, e, True) for s, e in newest_first if e.get('status') == 'archived']
 
     body = ''.join(active) if active else (
         '<div class="empty">No docs yet.<br>Register one:<br><br>'
         '<code>curl -X POST /api/docs -d \'{"path": "/abs/doc.md"}\'</code></div>')
     if archived:
         body += '<h2>Archived</h2><div class="archived">' + ''.join(archived) + '</div>'
+    arch_css = ('<style>.docrow{display:flex;align-items:stretch;gap:8px;margin-bottom:8px}'
+                '.docrow .doc{flex:1;margin-bottom:0}'
+                '.arch{flex:none;align-self:center;padding:6px 12px;border:1px solid #ccc;'
+                'border-radius:8px;background:#fff;color:#666;cursor:pointer;font-size:13px;'
+                'white-space:nowrap}'
+                '.arch:hover{background:#f2f2f2;border-color:#999}'
+                '.archived .arch{border-color:#bcd;color:#37a}</style>')
+    arch_js = ("<script>function arch(ev,slug,action){ev.preventDefault();"
+               "ev.stopPropagation();"
+               "if(action==='archive'&&!confirm('Archive this doc?'))return;"
+               "fetch('/api/docs/'+slug+'/'+action,{method:'POST'})"
+               ".then(function(r){if(r.ok)location.reload();else alert('Failed to '+action);})"
+               ".catch(function(){alert('Request failed');});}</script>")
     return ('<!doctype html><html><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f'<title>Doc Hub</title>{INDEX_CSS}</head><body><div class="wrap">'
+            f'<title>Doc Hub</title>{INDEX_CSS}{arch_css}</head><body><div class="wrap">'
             '<h1>Doc Hub</h1><div class="sub">every review, one place</div>'
-            f'{body}</div></body></html>')
+            f'{body}</div>{arch_js}</body></html>')
 
 
 # ---------------------------------------------------------------------------
