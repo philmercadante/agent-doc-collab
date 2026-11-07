@@ -345,7 +345,11 @@ body.rc-pinmode #rc-pinhint { display:block; }
   body.rc-docked #rc-sidebar { transform: translateX(0); box-shadow:-2px 0 12px rgba(0,0,0,.06); }
   body.rc-docked #rc-backdrop { display:none; }
   body.rc-docked #rc-fab { display:none; }
-  body.rc-docked #rc-close { display:none; }
+  /* Collapsible on wide screens (iPad, desktop): ✕ hides the docked panel,
+     the 💬 button brings it back. Choice is remembered per browser. */
+  body.rc-docked.rc-collapsed { margin-right: 0; }
+  body.rc-docked.rc-collapsed #rc-sidebar { transform: translateX(100%); box-shadow:none; }
+  body.rc-docked.rc-collapsed #rc-fab { display:block; }
 }
 </style>
 """
@@ -419,12 +423,19 @@ INJECT_JS = r"""
   }
 
   // ---- drawer ----
-  function openDrawer(){ if(isWide) return; el("rc-sidebar").classList.add("open"); el("rc-backdrop").classList.add("open"); }
-  function closeDrawer(){ el("rc-sidebar").classList.remove("open"); el("rc-backdrop").classList.remove("open"); }
+  function setCollapsed(on){
+    document.body.classList.toggle("rc-collapsed", on);
+    try{ localStorage.setItem("rc-collapsed", on?"1":"0"); }catch(e){}
+    setTimeout(renderMarks, 300);  // content width changed; re-place margin marks
+  }
+  function hideOverlay(){ el("rc-sidebar").classList.remove("open"); el("rc-backdrop").classList.remove("open"); }
+  function openDrawer(){ if(isWide){ if(document.body.classList.contains("rc-collapsed")) setCollapsed(false); return; }
+    el("rc-sidebar").classList.add("open"); el("rc-backdrop").classList.add("open"); }
+  function closeDrawer(){ if(isWide){ setCollapsed(true); return; } hideOverlay(); }
   function applyLayout(){
     isWide = window.matchMedia("(min-width: 900px)").matches;
     document.body.classList.toggle("rc-docked", isWide);
-    if(isWide){ closeDrawer(); }
+    if(isWide){ hideOverlay(); }
   }
 
   // ---- text offset model (within content root) ----
@@ -734,7 +745,7 @@ INJECT_JS = r"""
     pinMode=!pinMode; this.classList.toggle("on",pinMode);
     document.body.classList.toggle("rc-pinmode",pinMode);
     hideSelBar();
-    if(pinMode){ closeDrawer(); }   // so the doc is tappable on mobile
+    if(pinMode){ hideOverlay(); }   // so the doc is tappable on mobile
   });
   document.addEventListener("click", function(ev){
     if(!pinMode) return;
@@ -793,6 +804,7 @@ INJECT_JS = r"""
     });
   }
 
+  try{ if(localStorage.getItem("rc-collapsed")==="1") document.body.classList.add("rc-collapsed"); }catch(e){}
   applyLayout();
   setTimeout(function(){ refresh(true); }, 400);     // after layout settles
   setTimeout(function(){ renderMarks(); }, 1600);    // after mermaid renders
